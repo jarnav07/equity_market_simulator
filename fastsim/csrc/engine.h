@@ -110,6 +110,8 @@ struct Output {
   // trace_streamed stays false, both feeds are marked done, and the trace is in the t_ns.. columns.
   RowFeed* trace_feed = nullptr;
   RowFeed* trace_code_feed = nullptr;
+  // Called (before the loop) only when the engine does stream the trace: start its consumers.
+  std::function<void()> trace_stream_start;
   RecBuf<TRec> trecs;
   bool trace_streamed = false;
   std::string error;

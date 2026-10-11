@@ -630,3 +630,24 @@ gb-base 55 → 30 ms; mr-cancel-replace 132 → 76 ms; gb-mega 552 → 290 ms.
 Local Docker adds ~95 ms per container (a static no-op binary measures the same), so on this
 host the proxy is dominated by that fixed cost; `n9`'s trace streaming changes only the two
 largest units.
+
+---
+
+## Phase 11 — Never fail for want of a thread (image build `n10`)
+
+**Executive summary.** The `n9` submission scored −100,000,000 on the platform, which is the
+platform's value for a failed run, not a slow one. `n9` passes every local check, but it
+**aborts with no output when the container cannot start about eight threads**:
+`docker run --pids-limit 4` gives exit 139 (no files) with `n9`, and the correct, byte-identical
+files with `n10`. A per-container process limit on the grader is the most likely explanation.
+`n10` treats every extra thread as optional and never waits for one that does not exist.
+
+| change | effect |
+|---|---|
+| Every `std::thread` start (prefault helper, trace assembler, stream encoders, column-encode pool, ledger finisher, batch workers) is wrapped: if it fails, the calling thread does the work | Correct output with no extra threads at all (`prlimit --nproc=1` as a non-root user: identical files on gb-mega, pop-horizon, mr-cancel, s001) |
+| `PqStream::finish()` helps encode on the calling thread; a stream may have 0 threads | Progress never depends on a worker existing |
+| A guard marks every feed done on every exit path before the streams are destroyed | No join can wait forever |
+| Trace-stream encoder threads are started only when the engine decides to stream the trace (the 2 largest public units), not on every run | ~11 → ~6 threads on typical runs; mr-cancel-replace 91 → 80 ms locally |
+
+`tests/test_pqfast.cpp` now also runs streams with 0, 1 and 2 worker threads (80 cases, 0
+mismatches).

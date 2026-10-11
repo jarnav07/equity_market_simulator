@@ -100,7 +100,7 @@ bool pq_write_fast(PqSchema schema, const std::vector<PqColumn>& cols, int64_t n
                    int threads = 1);
 
 // Encodes a table whose rows are records in a growing array (RowFeed) while it grows, on
-// `threads` threads started by the constructor: complete batches of each column are encoded as
+// `threads` threads started by the constructor (0: all of it in finish()): complete batches of each column are encoded as
 // soon as they are published. Columns are given as for pq_write_fast, but with pointers that are
 // offsets from the records' base. finish() waits for feed.done and the last rows, then lays the
 // file out; the bytes are those pq_write_fast would produce for the final table.

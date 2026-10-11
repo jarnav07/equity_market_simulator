@@ -941,7 +941,13 @@ bool pq_write_fast(PqSchema schema, const std::vector<PqColumn>& cols, int64_t n
     const int nthreads = (int)std::min<size_t>((size_t)std::max(1, threads), enc.size());
     const auto tp0 = std::chrono::steady_clock::now();
     std::vector<std::thread> pool;
-    for (int t = 1; t < nthreads; t++) pool.emplace_back(work);
+    for (int t = 1; t < nthreads; t++) {
+      try {
+        pool.emplace_back(work);
+      } catch (const std::exception&) {
+        break;  // fewer threads: the calling thread does the rest
+      }
+    }
     work();
     for (auto& t : pool) t.join();
     if (!worker_err.empty()) {
@@ -1075,7 +1081,13 @@ PqStream::PqStream(PqSchema schema, const std::vector<PqColumn>& rel_cols, const
 PqStream::PqStream(PqSchema schema, const std::vector<PqColumn>& rel_cols, const std::vector<const RowFeed*>& feeds,
                    int threads)
     : impl(new Impl(schema, rel_cols, feeds)) {
-  for (int t = 0; t < std::max(1, threads); t++) impl->threads.emplace_back([this, t] { impl->work(t); });
+  for (int t = 0; t < threads; t++) {
+    try {
+      impl->threads.emplace_back([this, t] { impl->work(t); });
+    } catch (const std::exception&) {
+      break;  // finish() encodes whatever no thread did
+    }
+  }
 }
 
 PqStream::~PqStream() {
@@ -1085,6 +1097,7 @@ PqStream::~PqStream() {
 }
 
 bool PqStream::finish(PqImage* out, std::string& err) {
+  impl->work(0);  // help with the remaining batches (and do them all if no thread started)
   for (auto& t : impl->threads)
     if (t.joinable()) t.join();
   if (!impl->err.empty()) {

@@ -382,8 +382,12 @@ class Engine {
     set(pf_buf[3], tro.data(), tro.capacity(), sizeof(TrOrder));
     set(pf_buf[4], book_idx.data(), book_idx.capacity(), sizeof(int32_t));
     pf_publish();
-    pf_on = true;
-    pf_thread = std::thread([this] { pf_worker(); });
+    try {  // a helper is optional: where no thread can be started, pages fault in as usual
+      pf_thread = std::thread([this] { pf_worker(); });
+      pf_on = true;
+    } catch (const std::exception&) {
+      pf_on = false;
+    }
   }
   void pf_finish() {
     if (!pf_on) return;
@@ -501,7 +505,11 @@ class Engine {
     O->trecs.reserve(rows.capacity() + qrows.capacity());
     ta_publish();
     ta_on = true;
-    ta_thread = std::thread([this] { ta_worker(); });
+    if (O->trace_stream_start) O->trace_stream_start();
+    try {  // without a helper thread, ta_finish assembles everything at the end
+      ta_thread = std::thread([this] { ta_worker(); });
+    } catch (const std::exception&) {
+    }
   }
   // Ends the helper (if running) and finishes the stream from the complete record; false if the
   // stream was abandoned. Either way both feeds are marked done.

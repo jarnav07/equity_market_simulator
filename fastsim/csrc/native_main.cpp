@@ -205,9 +205,17 @@ bool run_one(Spec& spec, const ScenarioMeta& meta, const std::string& trace_path
       if (const char* e = std::getenv("FASTSIM_TRACE_STREAM_THREADS")) tt = std::max(1, std::atoi(e));
       out.trace_feed = &tfeed;
       out.trace_code_feed = &tcode_feed;
-      tstream.reset(trace_stream(tfeed, tcode_feed, tt));
+      out.trace_stream_start = [&tstream, &tfeed, &tcode_feed, tt] { tstream.reset(trace_stream(tfeed, tcode_feed, tt)); };
     }
   }
+  // Whatever happens, every feed ends up done before the streams are destroyed (their destructors
+  // join threads that wait for it). Declared after the streams, so it runs first.
+  struct FeedRelease {
+    RowFeed* f[3];
+    ~FeedRelease() {
+      for (RowFeed* x : f) x->done.store(true, std::memory_order_release);
+    }
+  } feed_release{{&feed, &tfeed, &tcode_feed}};
   bool ok_ledger = false;
   std::string err, err2;
   auto t0 = std::chrono::steady_clock::now();
@@ -226,16 +234,24 @@ bool run_one(Spec& spec, const ScenarioMeta& meta, const std::string& trace_path
   r.n_messages = (int64_t)out.lrows.size();
   auto t2 = std::chrono::steady_clock::now();
   std::thread ledger_thread;
+  auto finish_ledger = [&] {
+    PqImage img;
+    ok_ledger = stream->finish(&img, err2) && img.write_file(msg_path, &r.msg_sha, err2);
+  };
+  bool ledger_done = false;
   if (stream) {  // finish + write the ledger while the trace is encoded
-    ledger_thread = std::thread([&] {
-      PqImage img;
-      ok_ledger = stream->finish(&img, err2) && img.write_file(msg_path, &r.msg_sha, err2);
-    });
+    try {
+      ledger_thread = std::thread(finish_ledger);
+    } catch (const std::exception&) {
+      finish_ledger();
+      ledger_done = true;
+    }
   }
   bool ok_trace;
   {
     PqImage img;
     if (out.trace_streamed) {
+      if (!tstream) tstream.reset(trace_stream(tfeed, tcode_feed, 0));  // finish() encodes inline
       ok_trace = tstream->finish(&img, err) && img.write_file(trace_path, &r.trace_sha, err);
     } else {
       tstream.reset();  // abandoned (rows out of time order): the engine assembled the columns
@@ -244,7 +260,9 @@ bool run_one(Spec& spec, const ScenarioMeta& meta, const std::string& trace_path
   }
   if (ledger_thread.joinable()) {
     ledger_thread.join();
-  } else {
+  } else if (!ledger_done && stream) {
+    finish_ledger();
+  } else if (!ledger_done) {
     PqImage img;
     ok_ledger = ledger_image(out, &img, threads) && img.write_file(msg_path, &r.msg_sha, err2);
   }
@@ -417,7 +435,14 @@ int cmd_simulate_batch(int argc, char** argv) {
     work();
   } else {
     std::vector<std::thread> pool;
-    for (int w = 0; w < workers; w++) pool.emplace_back(work);
+    for (int w = 1; w < workers; w++) {
+      try {
+        pool.emplace_back(work);
+      } catch (const std::exception&) {
+        break;
+      }
+    }
+    work();  // the main thread takes sub-scenarios too (all of them if no thread started)
     for (auto& t : pool) t.join();
   }
   auto t1 = std::chrono::steady_clock::now();

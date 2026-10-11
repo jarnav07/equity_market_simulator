@@ -156,7 +156,7 @@ int main() {
       rel[i].valid = a[i].valid ? (const uint8_t*)(uintptr_t)(ncol * 8 + i) : nullptr;
       rel[i].valid_stride = rec;
     }
-    fastsim::PqStream stream(trace ? fastsim::PqSchema::TRACE : fastsim::PqSchema::LEDGER, rel, feed, 1 + t % 3);
+    fastsim::PqStream stream(trace ? fastsim::PqSchema::TRACE : fastsim::PqSchema::LEDGER, rel, feed, (t / 3) % 3);  // 0 threads: all of it in finish()
     int64_t have = 0;
     std::mt19937_64 step(t);
     while (have < n) {
