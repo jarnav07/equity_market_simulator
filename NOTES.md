@@ -651,3 +651,14 @@ files with `n10`. A per-container process limit on the grader is the most likely
 
 `tests/test_pqfast.cpp` now also runs streams with 0, 1 and 2 worker threads (80 cases, 0
 mismatches).
+
+### Checks on build `n10`
+
+| check | result |
+|---|---|
+| image oracle, 65 × 3 seeds + 6 batch units | **201 / 201 byte-identical** |
+| edge cases through the image | **44 / 44** |
+| `run_regression.py` | **65 / 65 PASS** |
+| batch units | **6 / 6 PASS** |
+| `docker run --pids-limit 4` (gb-mega) | `n9`: exit 139, no files; `n10`: identical files |
+| Final proxy (`window_rates.py`, mean over 65), `n9` → `n10` | 662k → **682k** |
